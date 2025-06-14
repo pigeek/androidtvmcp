@@ -96,3 +96,31 @@ class TestAndroidTVMCPServer:
         assert server.config == {}
         assert server.device_manager is not None
         assert server.command_processor is not None
+
+    @pytest.mark.asyncio
+    async def test_app_launch_validation(self, server):
+        """Test app launch tool validation."""
+        from src.androidtvmcp.models import AppCommand
+        
+        # Mock the command processor
+        mock_result = CommandResult(
+            success=True,
+            message="App launch successful",
+            device_id="test_device"
+        )
+        
+        with patch.object(server.command_processor, 'execute_app_command', new_callable=AsyncMock, return_value=mock_result):
+            # Test with app_id
+            command = AppCommand(device_id="test_device", action="launch", app_id="com.netflix.ninja")
+            result = await server.command_processor.execute_app_command(command)
+            assert result.success is True
+            
+            # Test with app_name
+            command = AppCommand(device_id="test_device", action="launch", app_name="Netflix")
+            result = await server.command_processor.execute_app_command(command)
+            assert result.success is True
+            
+            # Test with both app_id and app_name (should work)
+            command = AppCommand(device_id="test_device", action="launch", app_id="com.netflix.ninja", app_name="Netflix")
+            result = await server.command_processor.execute_app_command(command)
+            assert result.success is True

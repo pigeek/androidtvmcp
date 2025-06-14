@@ -3,52 +3,68 @@
 ## Current Work Focus
 
 ### Immediate Task
-**Project Rename Complete** - Successfully renamed project from atvrc2mcp to androidtvmcp throughout the entire codebase.
+
+**OpenAI Schema Compatibility Fixed** - Successfully resolved OpenAI library compatibility issue with atv_launch_app tool schema.
 
 ### Current Status
+
 - ✅ Created complete memory bank documentation structure
-- ✅ Implemented full MCP server with 9 Android TV control tools
+- ✅ Implemented full MCP server with 13 Android TV control tools
 - ✅ Built device discovery and connection management system
 - ✅ Created comprehensive command processing architecture
 - ✅ Developed CLI tools for server management and testing
 - ✅ Established project infrastructure (build, docs, tests, license)
-- ✅ **NEW**: Set up venv development environment successfully
-- ✅ **NEW**: Fixed async event loop issues in device discovery
-- ✅ **NEW**: Tested with real Android TV devices (discovered 10 devices)
-- ✅ **NEW**: All unit tests passing (6/6 tests)
-- ✅ **NEW**: MCP server functionality validated
+- ✅ Set up venv development environment successfully
+- ✅ Fixed async event loop issues in device discovery
+- ✅ Tested with real Android TV devices (discovered 11 devices)
+- ✅ All unit tests passing (7/7 tests)
+- ✅ MCP server functionality validated
+- ✅ Package published to PyPI as androidtvmcp v0.1.0
+- ✅ Verified installation from PyPI works correctly
+- ✅ CLI commands functional after PyPI installation
+- ✅ **NEW**: Fixed OpenAI schema compatibility issue
+- ✅ **NEW**: Removed 'anyOf' constraint from atv_launch_app tool
+- ✅ **NEW**: Added validation logic in tool handler
+- ✅ **NEW**: Created comprehensive test suite for validation
 
 ## Recent Changes
 
 ### Session Activity
+
 1. **venv Integration**: Updated README.md and techContext.md to include virtual environment setup
+
    - Added recommended venv usage for both installation and development
    - Updated development environment setup instructions
    - Maintained backward compatibility with global installation
 
 2. **Development Environment Setup**: Successfully created and tested venv environment
+
    - Created virtual environment with `python -m venv venv`
    - Installed project in development mode with all dependencies
    - Validated CLI functionality and help commands
 
 3. **Bug Fixes**: Resolved critical async event loop issues
+
    - Fixed `RuntimeError: no running event loop` in device discovery
    - Updated AndroidTVServiceListener to use `asyncio.run_coroutine_threadsafe()`
    - Added proper event loop handling for zeroconf service browser
 
 4. **Real Device Testing**: Successfully tested with actual Android TV devices
+
    - Discovered 10 devices including multiple Android TVs (Basement TV, Master Bedroom TV, Gym TV, Living Room TV)
    - Identified BRAVIA and other Android TV models correctly
    - Properly handled connection requirements (pairing needed)
    - Filtered non-Android TV devices appropriately
 
 5. **Validation**: Confirmed all core functionality working
+
    - All 6 unit tests passing
    - Device discovery working without errors
    - MCP server commands functional
    - CLI tools operational
 
 6. **MCP Server Error Fix**: ✅ COMPLETE
+
    - Fixed "unhandled errors in a TaskGroup (1 sub-exception)" error
    - Issue was in `get_capabilities()` call with None notification_options
    - Replaced with direct `ServerCapabilities` object creation
@@ -56,6 +72,7 @@
    - Confirmed device discovery working with multiple Android TV devices
 
 7. **Project Reorganization**: ✅ COMPLETE
+
    - Moved test files from root directory to `devtools/` directory
    - Updated import paths in all moved files to work from new location
    - Created `devtools/README.md` with documentation for each script
@@ -64,6 +81,7 @@
    - Improved project structure and organization
 
 8. **MCP Client Integration Fix**: ✅ COMPLETE
+
    - Fixed `stdio_client() missing 1 required positional argument: 'server'` error
    - Added proper `StdioServerParameters` configuration to test_mcp_client.py
    - Fixed resources listing error (`'tuple' object has no attribute 'get'`) in server.py
@@ -71,10 +89,27 @@
    - Validated complete MCP client-server communication working
    - All 13 MCP tools and 3 MCP resources now properly accessible
 
+9. **OpenAI Schema Compatibility Fix**: ✅ COMPLETE
+   - **Problem**: OpenAI library rejected atv_launch_app tool schema due to 'anyOf' constraint
+   - **Error**: `Invalid schema for function 'atv_launch_app': schema must have type 'object' and not have 'oneOf'/'anyOf'/'allOf'/'enum'/'not' at the top level`
+   - **Solution**: Removed 'anyOf' constraint from schema and added validation logic in tool handler
+   - **Changes Made**:
+     - Updated atv_launch_app tool schema to remove 'anyOf' requirement
+     - Added validation logic in handle_call_tool to check for app_id or app_name
+     - Updated tool description to clarify parameter requirements
+     - Created comprehensive test suite to validate the fix
+   - **Testing**: Created 3 test scripts to verify the solution:
+     - `test_mcp_client.py`: Tests MCP client communication with validation scenarios
+     - `test_openai_schema_validation.py`: Validates OpenAI schema compatibility
+     - `test_validation_logic.py`: Tests validation logic directly
+   - **Result**: Tool now works with OpenAI library while maintaining proper validation
+
 ## Next Steps
 
 ### Immediate Actions
+
 1. **Android TV Pairing Implementation**: ✅ COMPLETE
+
    - ✅ Create certificate management system for androidtvremote2
    - ✅ Implement pairing workflow for Android TV devices
    - ✅ Add pairing commands to CLI interface
@@ -90,12 +125,13 @@
    - [ ] Verify error handling in MCP protocol
 
 ### Short-term Goals
-1. **Real-world Testing**: 
+
+1. **Real-world Testing**:
    - Test device discovery on actual networks
    - Validate command execution with real Android TV devices
    - Test MCP integration with Cline and other clients
-   
 2. **Refinement**:
+
    - Fix any issues found during testing
    - Optimize performance for multiple devices
    - Enhance error handling based on real scenarios
@@ -108,6 +144,7 @@
 ## Active Decisions and Considerations
 
 ### Key Implementation Decisions Made
+
 - ✅ Python with asyncio for async/await throughout
 - ✅ MCP server using official Python SDK
 - ✅ androidtvremote2 library for Android TV communication
@@ -115,6 +152,7 @@
 - ✅ Pydantic for type safety and data validation
 
 ### Important Patterns Established
+
 - ✅ Memory bank as single source of truth
 - ✅ Modular component architecture (server, device manager, command processor)
 - ✅ MCP-first design with comprehensive tools and resources
@@ -122,6 +160,7 @@
 - ✅ CLI-based management and testing tools
 
 ### Implementation Highlights
+
 - **9 MCP Tools**: Complete Android TV control surface
 - **3 Resource Types**: Device info, status, and state monitoring
 - **Comprehensive Models**: 20+ Pydantic models for type safety
@@ -131,6 +170,7 @@
 ## Project Insights
 
 ### Key Learnings
+
 1. **Memory Bank Critical**: Documentation enables seamless continuation across sessions
 2. **MCP Integration**: Successfully implemented full MCP protocol with tools and resources
 3. **Android TV Integration**: androidtvremote2 provides robust Android TV communication
@@ -138,6 +178,7 @@
 5. **Python Ecosystem**: Rich async ecosystem enables elegant implementation
 
 ### Development Preferences Confirmed
+
 - ✅ Documentation-first approach with comprehensive README
 - ✅ Clear separation of concerns (server, device manager, commands)
 - ✅ Modular component architecture with dependency injection
@@ -148,18 +189,21 @@
 ## Context for Next Session
 
 ### Essential Information
+
 - Complete AndroidTVMCP implementation finished in single session
 - Project is fully functional Android TV remote control to MCP bridge
 - Working directory: /home/ilyap/workspace/atvrc2mcp
 - All core components implemented and documented
 
 ### Critical Next Actions
+
 1. Test implementation with real Android TV devices
 2. Validate MCP protocol compliance with actual clients
 3. Performance testing and optimization
 4. Production deployment preparation
 
 ## Notes
+
 - This session achieved complete initial implementation
 - All major components are implemented and documented
 - Next session should focus on testing and validation

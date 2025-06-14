@@ -113,6 +113,46 @@ async def test_mcp_client():
                 except Exception as e:
                     print(f"✗ Error testing navigation tool: {e}")
                 
+                # Test app launch tool with validation
+                try:
+                    # Test with missing app_id and app_name (should fail)
+                    result = await session.call_tool("atv_launch_app", {})
+                    print("✓ App launch tool validation test (expected to fail)")
+                    
+                    if result.content:
+                        content = result.content[0]
+                        if hasattr(content, 'text'):
+                            print(f"  Result: {content.text}")
+                        
+                except Exception as e:
+                    print(f"✗ Error testing app launch validation: {e}")
+                
+                # Test app launch tool with app_name
+                try:
+                    result = await session.call_tool("atv_launch_app", {"app_name": "Netflix"})
+                    print("✓ App launch tool with app_name executed (expected to fail without paired device)")
+                    
+                    if result.content:
+                        content = result.content[0]
+                        if hasattr(content, 'text'):
+                            print(f"  Result: {content.text}")
+                        
+                except Exception as e:
+                    print(f"✗ Error testing app launch with app_name: {e}")
+                
+                # Test app launch tool with app_id
+                try:
+                    result = await session.call_tool("atv_launch_app", {"app_id": "com.netflix.ninja"})
+                    print("✓ App launch tool with app_id executed (expected to fail without paired device)")
+                    
+                    if result.content:
+                        content = result.content[0]
+                        if hasattr(content, 'text'):
+                            print(f"  Result: {content.text}")
+                        
+                except Exception as e:
+                    print(f"✗ Error testing app launch with app_id: {e}")
+                
                 print("✓ MCP client communication test completed")
                 
     except Exception as e:

@@ -3,7 +3,7 @@
     "androidtvmcp": {
       "command": "python",
       "args": ["-m", "androidtvmcp", "serve", "--transport", "stdio"],
-      "cwd": "/home/ilyap/workspace/atvrc2mcp"
+      "cwd": "DIRECTORY"
     }
   }
 }

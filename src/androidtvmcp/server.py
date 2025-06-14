@@ -138,7 +138,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_launch_app",
-                    description="Launch an application on Android TV",
+                    description="Launch an application on Android TV. Provide either app_id or app_name.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -148,17 +148,13 @@ class AndroidTVMCPServer:
                             },
                             "app_id": {
                                 "type": "string",
-                                "description": "Application package name or ID"
+                                "description": "Application package name or ID. Either app_id or app_name must be provided."
                             },
                             "app_name": {
                                 "type": "string",
-                                "description": "Application display name (alternative to app_id)"
+                                "description": "Application display name. Either app_id or app_name must be provided."
                             }
-                        },
-                        "anyOf": [
-                            {"required": ["app_id"]},
-                            {"required": ["app_name"]}
-                        ]
+                        }
                     }
                 ),
                 Tool(
@@ -311,10 +307,17 @@ class AndroidTVMCPServer:
                     result = await self.command_processor.execute_volume(command)
                     
                 elif name == "atv_launch_app":
+                    app_id = arguments.get("app_id")
+                    app_name = arguments.get("app_name")
+                    
+                    # Validate that either app_id or app_name is provided
+                    if not app_id and not app_name:
+                        return [TextContent(type="text", text="Error: Either app_id or app_name must be provided")]
+                    
                     command = AppCommand(
                         device_id=device_id,
-                        app_id=arguments.get("app_id"),
-                        app_name=arguments.get("app_name"),
+                        app_id=app_id,
+                        app_name=app_name,
                         action="launch"
                     )
                     result = await self.command_processor.execute_app_command(command)
