@@ -97,7 +97,7 @@ class DeviceManager:
         self.retry_delay = self.connection_config.get("retry_delay", 1)
         
         # Certificate storage
-        self.cert_dir = Path.home() / ".atvrc2mcp" / "certificates"
+        self.cert_dir = Path.home() / ".androidtv" / "certificates"
         self.cert_dir.mkdir(parents=True, exist_ok=True)
         
         # Load existing certificates
@@ -609,6 +609,7 @@ class DeviceManager:
             PairingResult with pairing completion status
         """
         if device_id not in self.devices:
+            logger.error(f"Device not found during pairing completion: {device_id}")
             return PairingResult(
                 success=False,
                 message=f"Device not found: {device_id}",
@@ -622,6 +623,7 @@ class DeviceManager:
         # Get the pairing remote that was started earlier
         pairing_remotes = getattr(self, '_pairing_remotes', {})
         if device_id not in pairing_remotes:
+            logger.error(f"No active pairing session found for device {device_id} ({device.name})")
             return PairingResult(
                 success=False,
                 message=f"No active pairing session found for {device.name}. Please start pairing first.",
@@ -630,27 +632,63 @@ class DeviceManager:
                 error_code="NO_PAIRING_SESSION"
             )
         
+        # Validate PIN format
+        if not pin or not pin.strip():
+            logger.error(f"Empty PIN provided for device {device_id}")
+            return PairingResult(
+                success=False,
+                message="PIN cannot be empty",
+                device_id=device_id,
+                status=PairingStatus.PAIRING_FAILED,
+                error_code="INVALID_PIN_FORMAT"
+            )
+        
+        pin = pin.strip()
+        
+        if len(pin) < 4 or len(pin) > 6:
+            logger.error(f"Invalid PIN length for device {device_id}: {len(pin)} characters")
+            return PairingResult(
+                success=False,
+                message="PIN must be 4-6 digits long",
+                device_id=device_id,
+                status=PairingStatus.PAIRING_FAILED,
+                error_code="INVALID_PIN_LENGTH"
+            )
+        
         try:
-            logger.info(f"Completing pairing with {device.name} using PIN: {pin}")
+            # Log PIN details (masked for security)
+            pin_masked = pin[:2] + "*" * (len(pin) - 2)
+            logger.info(f"Completing pairing with {device.name} ({device_id}) using PIN: {pin_masked} (length: {len(pin)})")
+            logger.debug(f"Device details - Host: {device.host}, Port: {device.port}")
             
             # Use the existing pairing remote
             remote = pairing_remotes[device_id]
+            logger.debug(f"Using existing pairing remote for device {device_id}")
             
             # Complete pairing with PIN
+            logger.debug(f"Calling async_finish_pairing with PIN for device {device_id}")
             await remote.async_finish_pairing(pin)
+            logger.info(f"async_finish_pairing completed successfully for device {device_id}")
             
             # Read the generated certificate files
             temp_cert_file = self.cert_dir / f"temp_{device_id}.crt"
             temp_key_file = self.cert_dir / f"temp_{device_id}.key"
             
+            logger.debug(f"Checking for certificate files: {temp_cert_file}, {temp_key_file}")
+            
             if not temp_cert_file.exists() or not temp_key_file.exists():
+                logger.error(f"Certificate files missing after pairing - cert exists: {temp_cert_file.exists()}, key exists: {temp_key_file.exists()}")
                 raise Exception("Certificate files were not generated during pairing")
+            
+            logger.debug(f"Certificate files found, reading contents for device {device_id}")
             
             # Read certificate and key
             with open(temp_cert_file, 'r') as f:
                 cert_content = f.read()
             with open(temp_key_file, 'r') as f:
                 key_content = f.read()
+            
+            logger.debug(f"Certificate content length: {len(cert_content)}, Key content length: {len(key_content)}")
             
             # Store certificate
             certificate = DeviceCertificate(
@@ -661,23 +699,30 @@ class DeviceManager:
             )
             
             self.certificates[device_id] = certificate
+            logger.debug(f"Certificate stored for device {device_id}")
+            
             self._save_certificates()
+            logger.debug(f"Certificates saved to disk")
             
             # Clean up temporary files
             temp_cert_file.unlink()
             temp_key_file.unlink()
+            logger.debug(f"Temporary certificate files cleaned up for device {device_id}")
             
             # Clean up pairing remote
             del pairing_remotes[device_id]
+            logger.debug(f"Pairing remote cleaned up for device {device_id}")
             
             # Update device status
             device.status = DeviceStatus.DISCONNECTED
             device.pairing_status = PairingStatus.PAIRED
             
-            logger.info(f"Successfully paired with {device.name}")
+            logger.info(f"Successfully paired with {device.name} ({device_id})")
             
             # Attempt to connect now that we have certificates
-            await self._attempt_connection_with_cert(device_id)
+            logger.debug(f"Attempting connection with certificate for device {device_id}")
+            connection_success = await self._attempt_connection_with_cert(device_id)
+            logger.info(f"Post-pairing connection attempt for {device_id}: {'successful' if connection_success else 'failed'}")
             
             return PairingResult(
                 success=True,
@@ -688,7 +733,31 @@ class DeviceManager:
             )
             
         except Exception as e:
-            logger.error(f"Error completing pairing with {device_id}: {e}")
+            # Enhanced error handling with specific error types
+            error_message = str(e)
+            error_code = "PAIRING_COMPLETION_FAILED"
+            
+            # Check for specific error types
+            if "timeout" in error_message.lower():
+                error_code = "PAIRING_TIMEOUT"
+                error_message = f"Pairing timed out. The PIN may have expired. Please restart the pairing process. Original error: {error_message}"
+            elif "invalid" in error_message.lower() and "pin" in error_message.lower():
+                error_code = "INVALID_PIN"
+                error_message = f"Invalid PIN. Please check the PIN displayed on your TV and try again. Original error: {error_message}"
+            elif "connection" in error_message.lower():
+                error_code = "CONNECTION_ERROR"
+                error_message = f"Connection error during pairing. Please check your network connection. Original error: {error_message}"
+            elif "certificate" in error_message.lower():
+                error_code = "CERTIFICATE_ERROR"
+                error_message = f"Certificate generation failed. Please try pairing again. Original error: {error_message}"
+            
+            logger.error(f"Error completing pairing with {device_id}: {error_message}")
+            logger.error(f"Error type: {type(e).__name__}")
+            
+            # Log additional debugging information
+            import traceback
+            logger.debug(f"Full traceback for pairing error: {traceback.format_exc()}")
+            
             device.status = DeviceStatus.ERROR
             device.pairing_status = PairingStatus.PAIRING_FAILED
             
@@ -698,19 +767,22 @@ class DeviceManager:
                 temp_key_file = self.cert_dir / f"temp_{device_id}.key"
                 if temp_cert_file.exists():
                     temp_cert_file.unlink()
+                    logger.debug(f"Cleaned up temporary cert file: {temp_cert_file}")
                 if temp_key_file.exists():
                     temp_key_file.unlink()
+                    logger.debug(f"Cleaned up temporary key file: {temp_key_file}")
                 if device_id in pairing_remotes:
                     del pairing_remotes[device_id]
-            except:
-                pass
+                    logger.debug(f"Cleaned up pairing remote for device {device_id}")
+            except Exception as cleanup_error:
+                logger.warning(f"Error during cleanup after pairing failure: {cleanup_error}")
             
             return PairingResult(
                 success=False,
-                message=f"Failed to complete pairing: {str(e)}",
+                message=error_message,
                 device_id=device_id,
                 status=PairingStatus.PAIRING_FAILED,
-                error_code="PAIRING_COMPLETION_FAILED"
+                error_code=error_code
             )
 
     async def _attempt_connection_with_cert(self, device_id: str) -> bool:
