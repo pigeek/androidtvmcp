@@ -142,7 +142,6 @@ class PairingResult(BaseModel):
     device_id: str
     status: PairingStatus
     pin_required: bool = False
-    certificate: Optional[DeviceCertificate] = None
     error_code: Optional[str] = None
 
 

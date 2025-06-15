@@ -57,13 +57,13 @@ class AndroidTVMCPServer:
             return [
                 Tool(
                     name="atv_navigate",
-                    description="Navigate Android TV interface",
+                    description="Navigate Android TV interface. Requires device_id to specify which device to control.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "direction": {
                                 "type": "string",
@@ -71,36 +71,36 @@ class AndroidTVMCPServer:
                                 "description": "Navigation direction or action"
                             }
                         },
-                        "required": ["direction"]
+                        "required": ["device_id", "direction"]
                     }
                 ),
                 Tool(
                     name="atv_input_text",
-                    description="Send text input to Android TV",
+                    description="Send text input to Android TV. Requires device_id to specify which device to control.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "text": {
                                 "type": "string",
                                 "description": "Text to input"
                             }
                         },
-                        "required": ["text"]
+                        "required": ["device_id", "text"]
                     }
                 ),
                 Tool(
                     name="atv_playback",
-                    description="Control media playback on Android TV",
+                    description="Control media playback on Android TV. Requires device_id to specify which device to control.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "action": {
                                 "type": "string",
@@ -108,18 +108,18 @@ class AndroidTVMCPServer:
                                 "description": "Playback action"
                             }
                         },
-                        "required": ["action"]
+                        "required": ["device_id", "action"]
                     }
                 ),
                 Tool(
                     name="atv_volume",
-                    description="Control volume on Android TV",
+                    description="Control volume on Android TV. Requires device_id to specify which device to control.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "action": {
                                 "type": "string",
@@ -133,18 +133,18 @@ class AndroidTVMCPServer:
                                 "description": "Set specific volume level (0-100)"
                             }
                         },
-                        "required": ["action"]
+                        "required": ["device_id", "action"]
                     }
                 ),
                 Tool(
                     name="atv_launch_app",
-                    description="Launch an application on Android TV. Provide either app_id or app_name.",
+                    description="Launch an application on Android TV. Requires device_id to specify which device to control. Provide either app_id or app_name.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "app_id": {
                                 "type": "string",
@@ -154,7 +154,8 @@ class AndroidTVMCPServer:
                                 "type": "string",
                                 "description": "Application display name. Either app_id or app_name must be provided."
                             }
-                        }
+                        },
+                        "required": ["device_id"]
                     }
                 ),
                 Tool(
@@ -193,13 +194,13 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_power",
-                    description="Control power state of Android TV",
+                    description="Control power state of Android TV. Requires device_id to specify which device to control.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID (optional, uses default if not specified)"
+                                "description": "Android TV device ID (required - specify which device to control)"
                             },
                             "action": {
                                 "type": "string",
@@ -207,7 +208,7 @@ class AndroidTVMCPServer:
                                 "description": "Power action"
                             }
                         },
-                        "required": ["action"]
+                        "required": ["device_id", "action"]
                     }
                 ),
                 Tool(

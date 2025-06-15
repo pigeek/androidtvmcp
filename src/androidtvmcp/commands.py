@@ -280,21 +280,56 @@ class CommandProcessor:
                     # Find app by name and launch
                     apps = await self._get_device_apps(remote)
                     target_app = None
+                    
+                    # Try exact match first
                     for app in apps:
                         if app.name.lower() == command.app_name.lower():
                             target_app = app
                             break
                     
-                    if target_app:
+                    # If no exact match, try partial match
+                    if not target_app:
+                        for app in apps:
+                            if command.app_name.lower() in app.name.lower():
+                                target_app = app
+                                break
+                    
+                    # If still no match, try common app package names
+                    if not target_app:
+                        common_apps = {
+                            "netflix": "com.netflix.mediaclient",
+                            "youtube": "com.google.android.youtube.tv",
+                            "prime video": "com.amazon.avod.thirdpartyclient",
+                            "disney+": "com.disney.disneyplus",
+                            "hulu": "com.hulu.plus",
+                            "spotify": "com.spotify.tv.android",
+                            "plex": "com.plexapp.android",
+                            "kodi": "org.xbmc.kodi",
+                        }
+                        
+                        app_name_lower = command.app_name.lower()
+                        if app_name_lower in common_apps:
+                            # Try to launch directly by package name
+                            try:
+                                await remote.launch_app(common_apps[app_name_lower])
+                                message = f"Launched app: {command.app_name}"
+                            except Exception as e:
+                                return CommandResult(
+                                    success=False,
+                                    message=f"Failed to launch {command.app_name}: {str(e)}",
+                                    error_code="APP_LAUNCH_FAILED",
+                                    device_id=command.device_id
+                                )
+                        else:
+                            return CommandResult(
+                                success=False,
+                                message=f"App not found: {command.app_name}. Available apps: {', '.join([app.name for app in apps[:5]])}{'...' if len(apps) > 5 else ''}",
+                                error_code="APP_NOT_FOUND",
+                                device_id=command.device_id
+                            )
+                    else:
                         await remote.launch_app(target_app.package_name)
                         message = f"Launched app: {target_app.name}"
-                    else:
-                        return CommandResult(
-                            success=False,
-                            message=f"App not found: {command.app_name}",
-                            error_code="APP_NOT_FOUND",
-                            device_id=command.device_id
-                        )
                 else:
                     return CommandResult(
                         success=False,

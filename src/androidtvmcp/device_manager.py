@@ -728,8 +728,7 @@ class DeviceManager:
                 success=True,
                 message=f"Successfully paired with {device.name}",
                 device_id=device_id,
-                status=PairingStatus.PAIRED,
-                certificate=certificate
+                status=PairingStatus.PAIRED
             )
             
         except Exception as e:
