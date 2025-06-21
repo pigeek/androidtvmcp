@@ -508,7 +508,7 @@ class AndroidTVMCPServer:
                     write_stream,
                     InitializationOptions(
                         server_name="androidtvmcp",
-                        server_version="0.1.0",
+                        server_version="0.2.0",
                         capabilities=ServerCapabilities(
                             tools={},
                             resources={}

@@ -82,7 +82,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="androidtvmcp")
+@click.version_option(version="0.2.0", prog_name="androidtvmcp")
 def cli():
     """AndroidTVMCP - Android TV Remote Control to MCP Bridge."""
     pass
