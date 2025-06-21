@@ -264,7 +264,7 @@ class CommandProcessor:
             if command.action == "launch":
                 if command.app_id:
                     # Launch app by package name
-                    await remote.launch_app(command.app_id)
+                    remote.send_launch_app_command(command.app_id)
                     message = f"Launched app with ID: {command.app_id}"
                 elif command.app_name:
                     # Find app by name and launch
@@ -287,9 +287,9 @@ class CommandProcessor:
                     # If still no match, try common app package names
                     if not target_app:
                         common_apps = {
-                            "netflix": "com.netflix.mediaclient",
+                            "netflix": "com.netflix.ninja",
                             "youtube": "com.google.android.youtube.tv",
-                            "prime video": "com.amazon.avod.thirdpartyclient",
+                            "prime video": "com.amazon.amazonvideo.livingroom",
                             "disney+": "com.disney.disneyplus",
                             "hulu": "com.hulu.plus",
                             "spotify": "com.spotify.tv.android",
@@ -301,7 +301,7 @@ class CommandProcessor:
                         if app_name_lower in common_apps:
                             # Try to launch directly by package name
                             try:
-                                await remote.launch_app(common_apps[app_name_lower])
+                                remote.send_launch_app_command(common_apps[app_name_lower])
                                 message = f"Launched app: {command.app_name}"
                             except Exception as e:
                                 return CommandResult(
