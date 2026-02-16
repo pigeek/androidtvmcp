@@ -294,3 +294,48 @@ class LoggingConfig(BaseModel):
     
     class Config:
         extra = "allow"
+
+
+class CastState(str, Enum):
+    """Cast session state."""
+    IDLE = "idle"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    CASTING = "casting"
+    ERROR = "error"
+
+
+class CastResult(BaseModel):
+    """Result of a cast operation."""
+    success: bool
+    device_name: Optional[str] = None
+    device_host: Optional[str] = None
+    surface_id: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+
+
+class CastStatusResponse(BaseModel):
+    """Response for cast status query."""
+    casting: bool
+    device_name: Optional[str] = None
+    device_host: Optional[str] = None
+    surface_id: Optional[str] = None
+    canvas_server_url: Optional[str] = None
+    state: Optional[str] = None
+    connected: bool = False
+    error: Optional[str] = None
+
+
+class CastSession(BaseModel):
+    """Active cast session information."""
+    device_name: str
+    device_host: str
+    surface_id: str
+    canvas_server_url: str
+    state: CastState
+    receiver_url: str
+
+    class Config:
+        use_enum_values = True

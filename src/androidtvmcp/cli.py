@@ -108,8 +108,8 @@ def cli():
 @click.option(
     "--transport", "-t",
     default="stdio",
-    type=click.Choice(["stdio", "tcp"]),
-    help="Transport mechanism"
+    type=click.Choice(["stdio", "tcp", "sse"]),
+    help="Transport mechanism (stdio for local, sse for remote)"
 )
 @click.option(
     "--log-level", "-l",
@@ -165,6 +165,15 @@ def serve(
             asyncio.run(server.run_tcp(
                 host=mcp_config.get("host", host),
                 port=mcp_config.get("port", port)
+            ))
+        elif transport == "sse":
+            mcp_config = config_data.get("mcp", {})
+            sse_port = mcp_config.get("port", port)
+            click.echo(f"Starting SSE server on port {sse_port}...")
+            log_level_int = getattr(logging, log_level.upper(), logging.INFO)
+            asyncio.run(server.run_sse(
+                port=sse_port,
+                log_level=log_level_int
             ))
     except KeyboardInterrupt:
         click.echo("\nShutting down server...")

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp.server.models import ServerCapabilities
 from mcp.types import (
     Resource,
@@ -26,6 +27,7 @@ from .models import (
     AppCommand,
     DeviceCommand,
 )
+from .chromecast import ChromecastController
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,12 @@ class AndroidTVMCPServer:
         self.device_manager = DeviceManager(self.config.get("devices", {}))
         self.command_processor = CommandProcessor(self.device_manager)
         
+        # Initialize Chromecast controller for casting
+        cast_config = self.config.get("cast", {})
+        receiver_url = cast_config.get("receiver_url", "https://uijit.com/canvas-receiver")
+        app_id = cast_config.get("app_id", "BE2EA00B")
+        self.chromecast_controller = ChromecastController(receiver_url=receiver_url, app_id=app_id)
+        
         # Register MCP handlers
         self._register_tools()
         self._register_resources()
@@ -57,7 +65,7 @@ class AndroidTVMCPServer:
             return [
                 Tool(
                     name="atv_navigate",
-                    description="Navigate Android TV interface. Requires device_id to specify which device to control.",
+                    description="Navigate Android TV interface. Requires pairing first (use atv_start_pairing).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -76,7 +84,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_input_text",
-                    description="Send text input to Android TV. Requires device_id to specify which device to control.",
+                    description="Send text input to Android TV. Requires pairing first (use atv_start_pairing).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -94,7 +102,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_playback",
-                    description="Control media playback on Android TV. Requires device_id to specify which device to control.",
+                    description="Control media playback on Android TV. Requires pairing first (use atv_start_pairing).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -113,7 +121,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_volume",
-                    description="Control volume on Android TV. Requires device_id to specify which device to control.",
+                    description="Control volume on Android TV. Requires pairing first (use atv_start_pairing).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -132,7 +140,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_launch_app",
-                    description="Launch an application on Android TV. Requires device_id to specify which device to control. Provide either app_id or app_name.",
+                    description="Launch an application on Android TV. Requires pairing first (use atv_start_pairing). Provide either app_id or app_name.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -167,7 +175,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_get_devices",
-                    description="Get list of discovered Android TV devices",
+                    description="Get list of discovered Android TV/Chromecast devices on the network. IMPORTANT: Casting (atv_cast_url) works on ANY discovered device - no pairing needed. Pairing is ONLY required for remote control features (navigate, input, playback, volume, power). When multiple devices are found, ALWAYS ask the user which device to use - never assume.",
                     inputSchema={
                         "type": "object",
                         "properties": {}
@@ -188,7 +196,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_power",
-                    description="Control power state of Android TV. Requires device_id to specify which device to control.",
+                    description="Control power state of Android TV. Requires pairing first (use atv_start_pairing).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -259,6 +267,65 @@ class AndroidTVMCPServer:
                         },
                         "required": ["device_id"]
                     }
+                ),
+                # Chromecast Casting Tools (no pairing required)
+                Tool(
+                    name="atv_cast_url",
+                    description="Cast a Canvas surface to a Chromecast/Android TV device. NO PAIRING REQUIRED - works with ANY discovered device. If the user didn't specify which device, ask them to choose from the available devices first.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "device_id": {
+                                "type": "string",
+                                "description": "Android TV device ID to cast to"
+                            },
+                            "canvas_server_url": {
+                                "type": "string",
+                                "description": "WebSocket URL of the Canvas server (e.g., ws://192.168.1.50:8080)"
+                            },
+                            "surface_id": {
+                                "type": "string",
+                                "description": "Canvas surface ID to display"
+                            }
+                        },
+                        "required": ["device_id", "canvas_server_url", "surface_id"]
+                    }
+                ),
+                Tool(
+                    name="atv_cast_stop",
+                    description="Stop casting on a Chromecast/Android TV device. No pairing required.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "device_id": {
+                                "type": "string",
+                                "description": "Android TV device ID to stop casting on"
+                            }
+                        },
+                        "required": ["device_id"]
+                    }
+                ),
+                Tool(
+                    name="atv_cast_status",
+                    description="Get casting status for a Chromecast/Android TV device. No pairing required.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "device_id": {
+                                "type": "string",
+                                "description": "Android TV device ID to check casting status"
+                            }
+                        },
+                        "required": ["device_id"]
+                    }
+                ),
+                Tool(
+                    name="atv_list_paired",
+                    description="List all paired Android TV devices with their status",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {}
+                    }
                 )
             ]
 
@@ -319,26 +386,32 @@ class AndroidTVMCPServer:
                     result = await self.command_processor.get_devices()
                     # Return JSON for better parsing
                     import json
+                    devices_list = [
+                        {
+                            "id": device.id,
+                            "name": device.name,
+                            "host": device.host,
+                            "port": device.port,
+                            "model": device.model,
+                            "version": device.version,
+                            "status": device.status.value if hasattr(device.status, 'value') else str(device.status),
+                            "pairing_status_for_remote_control": device.pairing_status.value if hasattr(device.pairing_status, 'value') else str(device.pairing_status),
+                            "casting_available": True,
+                            "capabilities": device.capabilities,
+                            "last_seen": device.last_seen
+                        }
+                        for device in result.devices
+                    ]
                     devices_data = {
-                        "devices": [
-                            {
-                                "id": device.id,
-                                "name": device.name,
-                                "host": device.host,
-                                "port": device.port,
-                                "model": device.model,
-                                "version": device.version,
-                                "status": device.status.value if hasattr(device.status, 'value') else str(device.status),
-                                "pairing_status": device.pairing_status.value if hasattr(device.pairing_status, 'value') else str(device.pairing_status),
-                                "capabilities": device.capabilities,
-                                "last_seen": device.last_seen
-                            }
-                            for device in result.devices
-                        ],
+                        "casting_info": "Casting works on ALL devices listed - no pairing needed. Pairing is only for remote control features.",
+                        "devices": devices_list,
                         "total": result.total,
                         "connected": result.connected,
                         "disconnected": result.disconnected
                     }
+                    # Add action_required if multiple devices
+                    if len(devices_list) > 1:
+                        devices_data["action_required"] = f"STOP! {len(devices_list)} devices found. You MUST ask the user which device to use. Present the list of device names and wait for user selection. Do NOT assume or proceed without explicit user choice."
                     return [TextContent(type="text", text=json.dumps(devices_data, indent=2))]
                     
                 elif name == "atv_get_status":
@@ -364,6 +437,54 @@ class AndroidTVMCPServer:
                     
                 elif name == "atv_get_pairing_status":
                     result = await self.command_processor.get_pairing_status(arguments["device_id"])
+                
+                # Chromecast Casting Tools
+                elif name == "atv_cast_url":
+                    # Get device to find its host IP
+                    device = await self.device_manager.get_device(arguments["device_id"])
+                    if not device:
+                        return [TextContent(type="text", text=f"Error: Device not found: {arguments['device_id']}")]
+                    
+                    result = await self.chromecast_controller.cast_to_device(
+                        host=device.host,
+                        canvas_server_url=arguments["canvas_server_url"],
+                        surface_id=arguments["surface_id"],
+                        device_name=device.name
+                    )
+                    import json
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+                
+                elif name == "atv_cast_stop":
+                    device = await self.device_manager.get_device(arguments["device_id"])
+                    if not device:
+                        return [TextContent(type="text", text=f"Error: Device not found: {arguments['device_id']}")]
+                    
+                    result = await self.chromecast_controller.stop_cast(device.host)
+                    import json
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+                
+                elif name == "atv_cast_status":
+                    device = await self.device_manager.get_device(arguments["device_id"])
+                    if not device:
+                        return [TextContent(type="text", text=f"Error: Device not found: {arguments['device_id']}")]
+                    
+                    result = await self.chromecast_controller.get_cast_status(device.host)
+                    import json
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+                
+                elif name == "atv_list_paired":
+                    paired_devices = await self.command_processor.get_paired_devices()
+                    # Also get cast sessions
+                    cast_sessions = await self.chromecast_controller.get_all_sessions()
+                    
+                    # Merge cast status into paired devices
+                    result = {
+                        "paired_devices": paired_devices.get("paired_devices", []),
+                        "total_paired": paired_devices.get("total_paired", 0),
+                        "active_casts": cast_sessions
+                    }
+                    import json
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
                     
                 else:
                     raise ValueError(f"Unknown tool: {name}")
@@ -530,21 +651,108 @@ class AndroidTVMCPServer:
 
     async def run_tcp(self, host: str = "localhost", port: int = 8080) -> None:
         """Run the MCP server with TCP transport.
-        
+
         Args:
             host: Host to bind to
             port: Port to bind to
         """
         logger.info(f"Starting AndroidTVMCP server on {host}:{port}")
-        
+
         # Start device discovery
         await self.start_discovery()
-        
+
         try:
             # TCP transport implementation would go here
             # This is a placeholder for future TCP transport support
             raise NotImplementedError("TCP transport not yet implemented")
         finally:
             # Stop device discovery
+            await self.stop_discovery()
+            logger.info("AndroidTVMCP server stopped")
+
+    async def run_sse(self, port: int = 3002, log_level: int = logging.INFO) -> None:
+        """Run the MCP server with SSE transport for remote access.
+
+        Args:
+            port: Port for the SSE endpoint
+            log_level: Logging level
+        """
+        import uvicorn
+
+        logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        logger.info(f"Starting AndroidTVMCP server with SSE transport on port {port}")
+
+        # Create SSE transport
+        sse_transport = SseServerTransport("/messages/")
+        
+        # Keep reference to discovery task
+        discovery_task = None
+
+        # Create raw ASGI handlers for SSE (Starlette Request doesn't expose send correctly)
+        async def handle_sse(scope, receive, send):
+            async with sse_transport.connect_sse(scope, receive, send) as streams:
+                await self.server.run(
+                    streams[0],
+                    streams[1],
+                    InitializationOptions(
+                        server_name="androidtvmcp",
+                        server_version="0.2.0",
+                        capabilities=ServerCapabilities(
+                            tools={},
+                            resources={}
+                        ),
+                    ),
+                )
+
+        async def handle_messages(scope, receive, send):
+            await sse_transport.handle_post_message(scope, receive, send)
+
+        # Create ASGI app that routes based on path
+        async def app(scope, receive, send):
+            nonlocal discovery_task
+            if scope["type"] == "http":
+                path = scope["path"]
+                if path == "/sse" and scope["method"] == "GET":
+                    await handle_sse(scope, receive, send)
+                elif path.startswith("/messages") and scope["method"] == "POST":
+                    await handle_messages(scope, receive, send)
+                else:
+                    # Return 404
+                    await send({"type": "http.response.start", "status": 404, "headers": []})
+                    await send({"type": "http.response.body", "body": b"Not Found"})
+            elif scope["type"] == "lifespan":
+                # Handle lifespan events - discovery starts here, orthogonal to MCP
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        # Start discovery as background task - doesn't block server startup
+                        logger.info("Starting device discovery (background task)")
+                        discovery_task = asyncio.create_task(self.start_discovery())
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        # Cancel discovery task if running
+                        if discovery_task and not discovery_task.done():
+                            discovery_task.cancel()
+                            try:
+                                await discovery_task
+                            except asyncio.CancelledError:
+                                pass
+                        await self.stop_discovery()
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+
+        try:
+            config = uvicorn.Config(
+                app,
+                host="0.0.0.0",
+                port=port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            await server.serve()
+        except Exception as e:
+            logger.error(f"Server error: {e}")
+            raise
+        finally:
             await self.stop_discovery()
             logger.info("AndroidTVMCP server stopped")

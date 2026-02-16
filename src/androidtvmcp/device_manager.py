@@ -346,8 +346,15 @@ class DeviceManager:
             if success:
                 logger.info(f"Successfully connected to paired device: {device.name}")
                 return True
+            # Connection failed but certificate exists - keep paired status
+            # This handles temporary network issues without requiring re-pairing
+            if device_id in self.certificates:
+                logger.info(f"Connection failed for {device.name} but certificate still valid, will retry later")
+                device.status = DeviceStatus.DISCONNECTED
+                device.pairing_status = PairingStatus.PAIRED
+                return False
         
-        # Device requires pairing
+        # Device requires pairing (no certificate)
         logger.info(f"Android TV device found but requires pairing: {device.name} ({device_id})")
         device.status = DeviceStatus.PAIRING_REQUIRED
         device.pairing_status = PairingStatus.NOT_PAIRED
@@ -993,8 +1000,11 @@ class DeviceManager:
                 api_port=device.port
             )
             
-            # Connect to device
-            await remote.async_connect()
+            # Connect to device with timeout to avoid blocking MCP initialization
+            try:
+                await asyncio.wait_for(remote.async_connect(), timeout=5.0)
+            except asyncio.TimeoutError:
+                raise ConnectionError(f"Connection to {device.host}:{device.port} timed out")
             
             # Store connection
             self.connections[device_id] = remote

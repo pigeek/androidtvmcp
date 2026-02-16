@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "click>=8.0.0",
     "pynput>=1.7.0",
+    "pychromecast>=14.0.0",
 ]
 
 [project.optional-dependencies]
