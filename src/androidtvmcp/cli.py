@@ -15,17 +15,20 @@ from .models import ConfigModel, DeviceConfig, MCPConfig, LoggingConfig
 
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     """Setup logging configuration.
-    
+
     Args:
         level: Logging level
         log_file: Optional log file path
+
+    Note: Uses stderr for stdio transport compatibility (stdout is reserved for JSON-RPC)
     """
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    
-    handlers = [logging.StreamHandler(sys.stdout)]
+
+    # Use stderr for MCP stdio transport compatibility
+    handlers = [logging.StreamHandler(sys.stderr)]
     if log_file:
         handlers.append(logging.FileHandler(log_file))
-    
+
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format=log_format,
