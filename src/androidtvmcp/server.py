@@ -409,9 +409,9 @@ class AndroidTVMCPServer:
                         "connected": result.connected,
                         "disconnected": result.disconnected
                     }
-                    # Add action_required if multiple devices
+                    # Add hint if multiple devices (but don't block if user already specified)
                     if len(devices_list) > 1:
-                        devices_data["action_required"] = f"STOP! {len(devices_list)} devices found. You MUST ask the user which device to use. Present the list of device names and wait for user selection. Do NOT assume or proceed without explicit user choice."
+                        devices_data["note"] = f"{len(devices_list)} devices found. If the user already specified which device to use in their request, proceed with that device. Otherwise, ask the user to choose."
                     return [TextContent(type="text", text=json.dumps(devices_data, indent=2))]
                     
                 elif name == "atv_get_status":
