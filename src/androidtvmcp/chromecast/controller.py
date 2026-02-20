@@ -5,6 +5,8 @@ import logging
 from typing import Any, Dict, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import urlparse
+from uuid import UUID
 
 import pychromecast
 from pychromecast.controllers import BaseController
@@ -42,7 +44,7 @@ class CastSession:
 
 class CanvasController(BaseController):
     """Custom Cast controller for Canvas communication.
-    
+
     This controller handles the custom namespace messages between
     the sender (this MCP server) and the receiver app running on Chromecast.
     """
@@ -54,24 +56,24 @@ class CanvasController(BaseController):
 
     def receive_message(self, message: Dict[str, Any], data: Any) -> bool:
         """Handle incoming messages from the receiver.
-        
+
         Args:
             message: The message payload
             data: Additional data
-            
+
         Returns:
             True if the message was handled
         """
         logger.debug(f"Received Canvas message: {message}")
-        
+
         if self._message_callback:
             self._message_callback(message)
-        
+
         return True
 
     def set_message_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Set a callback for incoming messages.
-        
+
         Args:
             callback: Function to call when messages are received
         """
@@ -79,14 +81,18 @@ class CanvasController(BaseController):
 
     def connect_canvas(self, canvas_server_url: str, surface_id: str) -> None:
         """Send connect message to receiver with canvas server details.
-        
+
         Args:
-            canvas_server_url: WebSocket URL of the Canvas server
+            canvas_server_url: WebSocket URL of the Canvas server (base or full)
             surface_id: Canvas surface ID to connect to
         """
+        # Normalize to base URL (scheme://host:port) — the receiver appends /ws/{surfaceId}
+        parsed = urlparse(canvas_server_url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+
         message = {
             "type": "connect",
-            "canvasServerUrl": canvas_server_url,
+            "canvasServerUrl": base_url,
             "surfaceId": surface_id
         }
         logger.info(f"Sending Canvas connect message: {message}")
@@ -113,7 +119,7 @@ class CanvasController(BaseController):
 
 class ChromecastController:
     """Manages Chromecast connections and Canvas casting.
-    
+
     This controller handles:
     - Finding Chromecast devices by IP (using existing Android TV discovery)
     - Launching the Canvas receiver app
@@ -122,12 +128,12 @@ class ChromecastController:
     """
 
     def __init__(
-        self, 
+        self,
         receiver_url: str = DEFAULT_RECEIVER_URL,
         app_id: str = DEFAULT_APP_ID
     ):
         """Initialize the Chromecast controller.
-        
+
         Args:
             receiver_url: URL of the hosted Canvas receiver app
             app_id: Registered Chromecast App ID for the receiver
@@ -148,21 +154,21 @@ class ChromecastController:
         timeout: float = 15.0
     ) -> Dict[str, Any]:
         """Cast a Canvas surface to a Chromecast device.
-        
+
         Args:
             host: IP address of the Chromecast device
             canvas_server_url: WebSocket URL of the Canvas server
             surface_id: Canvas surface ID to display
             device_name: Friendly name for the device (optional)
             timeout: Connection timeout in seconds
-            
+
         Returns:
             Dictionary with cast result
         """
         async with self._lock:
             try:
                 logger.info(f"Starting cast to {host} for surface {surface_id}")
-                
+
                 # Get or create Chromecast connection
                 cast = await self._get_or_connect_device(host, timeout)
                 if not cast:
@@ -173,7 +179,7 @@ class ChromecastController:
                     }
 
                 device_name = device_name or cast.name or host
-                
+
                 # Create and register Canvas controller
                 canvas_ctrl = CanvasController(app_id=self.app_id)
                 cast.register_handler(canvas_ctrl)
@@ -182,7 +188,7 @@ class ChromecastController:
                 # Launch the receiver app and wait for it to be ready
                 logger.info(f"Launching Canvas receiver on {device_name} (App ID: {self.app_id})")
                 await self._launch_app_and_wait(cast, self.app_id, timeout=15.0)
-                
+
                 # Send connect message with Canvas server details
                 canvas_ctrl.connect_canvas(canvas_server_url, surface_id)
 
@@ -215,10 +221,10 @@ class ChromecastController:
 
     async def stop_cast(self, host: str) -> Dict[str, Any]:
         """Stop casting on a device.
-        
+
         Args:
             host: IP address of the Chromecast device
-            
+
         Returns:
             Dictionary with stop result
         """
@@ -256,16 +262,16 @@ class ChromecastController:
 
     async def get_cast_status(self, host: str) -> Dict[str, Any]:
         """Get casting status for a device.
-        
+
         Args:
             host: IP address of the Chromecast device
-            
+
         Returns:
             Dictionary with cast status
         """
         try:
             session = self._sessions.get(host)
-            
+
             if not session:
                 return {
                     "casting": False,
@@ -299,7 +305,7 @@ class ChromecastController:
 
     async def get_all_sessions(self) -> Dict[str, Dict[str, Any]]:
         """Get all active cast sessions.
-        
+
         Returns:
             Dictionary mapping device host to session info
         """
@@ -320,6 +326,9 @@ class ChromecastController:
     ) -> Optional[pychromecast.Chromecast]:
         """Get existing connection or create new one.
 
+        Connects directly by IP using get_chromecast_from_host (no zeroconf/mDNS).
+        This avoids zeroconf lifecycle issues that cause stale state requiring reboots.
+
         Args:
             host: IP address of the device
             timeout: Connection timeout
@@ -327,85 +336,50 @@ class ChromecastController:
         Returns:
             Chromecast instance or None
         """
-        # Check if we already have a connection
+        # Check if we already have a healthy connection
         if host in self._cast_devices:
             cast = self._cast_devices[host]
             if cast.socket_client.is_connected:
                 return cast
-            # Connection lost, remove and reconnect
+            # Connection lost — disconnect cleanly and reconnect
+            logger.info(f"Stale connection to {host}, reconnecting")
+            try:
+                cast.disconnect()
+            except Exception:
+                pass
             del self._cast_devices[host]
 
-        browser = None
         try:
-            # Connect to device by IP
             logger.info(f"Connecting to Chromecast at {host} (timeout: {timeout}s)")
 
-            # Run pychromecast connection in thread pool WITH timeout wrapper
             loop = asyncio.get_event_loop()
 
-            def _blocking_discover():
-                """Blocking discovery call - runs in thread pool."""
-                return pychromecast.get_chromecasts(
-                    known_hosts=[host],
-                    timeout=min(timeout, 10.0)  # Cap internal timeout
+            def _blocking_connect():
+                """Connect directly by IP — no zeroconf needed."""
+                _cast = pychromecast.get_chromecast_from_host(
+                    (host, 8009, UUID(int=0), None, None),
+                    timeout=timeout,
                 )
+                _cast.wait(timeout=timeout)
+                return _cast
 
             try:
-                chromecasts, browser = await asyncio.wait_for(
-                    loop.run_in_executor(None, _blocking_discover),
-                    timeout=timeout
+                cast = await asyncio.wait_for(
+                    loop.run_in_executor(None, _blocking_connect),
+                    timeout=timeout + 2  # small buffer over internal timeout
                 )
             except asyncio.TimeoutError:
-                logger.error(f"Timeout discovering Chromecast at {host} after {timeout}s")
-                return None
-
-            if not chromecasts:
-                logger.warning(f"No Chromecast found at {host}")
-                return None
-
-            # Log all discovered devices for debugging
-            for cc in chromecasts:
-                logger.info(f"Discovered Chromecast: {cc.name} at {cc.cast_info.host}")
-
-            # Find the device matching our target IP
-            cast = None
-            for cc in chromecasts:
-                if cc.cast_info.host == host:
-                    cast = cc
-                    break
-
-            if not cast:
-                logger.warning(f"Target host {host} not found in discovered devices, using first device")
-                cast = chromecasts[0]
-
-            # Wait for connection WITH timeout
-            try:
-                await asyncio.wait_for(
-                    loop.run_in_executor(None, cast.wait),
-                    timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"Timeout waiting for Chromecast connection at {host}")
+                logger.error(f"Timeout connecting to Chromecast at {host} after {timeout}s")
                 return None
 
             self._cast_devices[host] = cast
-            logger.info(f"Connected to Chromecast: {cast.name}")
+            logger.info(f"Connected to Chromecast: {cast.name or host}")
 
             return cast
 
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout connecting to Chromecast at {host}")
-            return None
         except Exception as e:
             logger.error(f"Failed to connect to Chromecast at {host}: {e}")
             return None
-        finally:
-            # Clean up browser if it was created
-            if browser:
-                try:
-                    browser.stop_discovery()
-                except Exception:
-                    pass
 
     async def _launch_app_and_wait(
         self,
@@ -414,44 +388,44 @@ class ChromecastController:
         timeout: float = 15.0
     ) -> bool:
         """Launch an app and wait for it to be ready.
-        
+
         Args:
             cast: Chromecast instance
             app_id: App ID to launch
             timeout: Maximum time to wait for app launch
-            
+
         Returns:
             True if app launched successfully
-            
+
         Raises:
             TimeoutError: If app doesn't launch within timeout
             RuntimeError: If app fails to start
         """
         loop = asyncio.get_event_loop()
         app_ready = asyncio.Event()
-        
+
         class AppLaunchListener:
             """Listener to detect when app has launched."""
             def __init__(self, target_app_id: str, event: asyncio.Event, loop):
                 self.target_app_id = target_app_id
                 self.event = event
                 self.loop = loop
-            
+
             def new_cast_status(self, status: CastStatus):
                 """Called when cast status changes."""
                 if status.app_id == self.target_app_id:
                     logger.info(f"App {self.target_app_id} is now running")
                     self.loop.call_soon_threadsafe(self.event.set)
-        
+
         listener = AppLaunchListener(app_id, app_ready, loop)
         cast.register_status_listener(listener)
-        
+
         try:
             # Check if app is already running
             if cast.status and cast.status.app_id == app_id:
                 logger.info(f"App {app_id} is already running")
                 return True
-            
+
             # Launch the app
             logger.info(f"Calling start_app({app_id}) on {cast.name}")
             try:
@@ -459,7 +433,7 @@ class ChromecastController:
             except Exception as e:
                 logger.error(f"start_app raised exception: {type(e).__name__}: {e}")
                 raise RuntimeError(f"Failed to start app {app_id}: {type(e).__name__}: {e}")
-            
+
             # Wait for app to be ready
             try:
                 await asyncio.wait_for(app_ready.wait(), timeout=timeout)
@@ -468,7 +442,7 @@ class ChromecastController:
             except asyncio.TimeoutError:
                 logger.error(f"Timeout waiting for app {app_id} to launch")
                 raise TimeoutError(f"App {app_id} did not launch within {timeout}s")
-        
+
         finally:
             # Unregister listener (pychromecast doesn't have unregister, but listener will be garbage collected)
             pass
@@ -477,14 +451,17 @@ class ChromecastController:
         """Disconnect from all Chromecast devices."""
         async with self._lock:
             for host in list(self._sessions.keys()):
-                await self.stop_cast(host)
-            
+                try:
+                    await self.stop_cast(host)
+                except Exception as e:
+                    logger.error(f"Error stopping cast on {host}: {e}")
+
             for host, cast in list(self._cast_devices.items()):
                 try:
                     cast.disconnect()
                 except Exception as e:
                     logger.error(f"Error disconnecting from {host}: {e}")
-            
+
             self._cast_devices.clear()
             self._canvas_controllers.clear()
             self._sessions.clear()
