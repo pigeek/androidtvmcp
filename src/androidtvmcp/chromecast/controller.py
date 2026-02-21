@@ -155,6 +155,9 @@ class ChromecastController:
     ) -> Dict[str, Any]:
         """Cast a Canvas surface to a Chromecast device.
 
+        On connection failure, cleans up stale state and retries once with
+        a fresh connection, avoiding the need to restart the server.
+
         Args:
             host: IP address of the Chromecast device
             canvas_server_url: WebSocket URL of the Canvas server
@@ -166,58 +169,92 @@ class ChromecastController:
             Dictionary with cast result
         """
         async with self._lock:
+            result = await self._try_cast(host, canvas_server_url, surface_id, device_name, timeout)
+
+            if not result["success"] and result.get("error_code") == "CONNECTION_FAILED":
+                # Clean up all stale state for this host and retry once
+                logger.info(f"First cast attempt to {host} failed, cleaning up and retrying")
+                self._cleanup_device_state(host)
+                result = await self._try_cast(host, canvas_server_url, surface_id, device_name, timeout)
+
+            return result
+
+    def _cleanup_device_state(self, host: str) -> None:
+        """Clean up all cached state for a device host.
+
+        Disconnects any stale pychromecast instance and removes
+        associated controllers and sessions.
+        """
+        if host in self._cast_devices:
             try:
-                logger.info(f"Starting cast to {host} for surface {surface_id}")
+                self._cast_devices[host].disconnect()
+            except Exception:
+                pass
+            del self._cast_devices[host]
+        self._canvas_controllers.pop(host, None)
+        self._sessions.pop(host, None)
 
-                # Get or create Chromecast connection
-                cast = await self._get_or_connect_device(host, timeout)
-                if not cast:
-                    return {
-                        "success": False,
-                        "error": f"Failed to connect to device at {host}",
-                        "error_code": "CONNECTION_FAILED"
-                    }
+    async def _try_cast(
+        self,
+        host: str,
+        canvas_server_url: str,
+        surface_id: str,
+        device_name: Optional[str] = None,
+        timeout: float = 15.0
+    ) -> Dict[str, Any]:
+        """Single attempt to cast a Canvas surface to a Chromecast device."""
+        try:
+            logger.info(f"Starting cast to {host} for surface {surface_id}")
 
-                device_name = device_name or cast.name or host
-
-                # Create and register Canvas controller
-                canvas_ctrl = CanvasController(app_id=self.app_id)
-                cast.register_handler(canvas_ctrl)
-                self._canvas_controllers[host] = canvas_ctrl
-
-                # Launch the receiver app and wait for it to be ready
-                logger.info(f"Launching Canvas receiver on {device_name} (App ID: {self.app_id})")
-                await self._launch_app_and_wait(cast, self.app_id, timeout=15.0)
-
-                # Send connect message with Canvas server details
-                canvas_ctrl.connect_canvas(canvas_server_url, surface_id)
-
-                # Store session
-                self._sessions[host] = CastSession(
-                    device_name=device_name,
-                    device_host=host,
-                    surface_id=surface_id,
-                    canvas_server_url=canvas_server_url,
-                    state=CastState.CASTING,
-                    receiver_url=self.receiver_url
-                )
-
-                logger.info(f"Successfully casting to {device_name}")
-                return {
-                    "success": True,
-                    "device_name": device_name,
-                    "device_host": host,
-                    "surface_id": surface_id,
-                    "message": f"Casting to {device_name}"
-                }
-
-            except Exception as e:
-                logger.error(f"Error casting to {host}: {e}")
+            # Get or create Chromecast connection
+            cast = await self._get_or_connect_device(host, timeout)
+            if not cast:
                 return {
                     "success": False,
-                    "error": str(e),
-                    "error_code": "CAST_ERROR"
+                    "error": f"Failed to connect to device at {host}",
+                    "error_code": "CONNECTION_FAILED"
                 }
+
+            device_name = device_name or cast.name or host
+
+            # Create and register Canvas controller
+            canvas_ctrl = CanvasController(app_id=self.app_id)
+            cast.register_handler(canvas_ctrl)
+            self._canvas_controllers[host] = canvas_ctrl
+
+            # Launch the receiver app and wait for it to be ready
+            logger.info(f"Launching Canvas receiver on {device_name} (App ID: {self.app_id})")
+            await self._launch_app_and_wait(cast, self.app_id, timeout=15.0)
+
+            # Send connect message with Canvas server details
+            canvas_ctrl.connect_canvas(canvas_server_url, surface_id)
+
+            # Store session
+            self._sessions[host] = CastSession(
+                device_name=device_name,
+                device_host=host,
+                surface_id=surface_id,
+                canvas_server_url=canvas_server_url,
+                state=CastState.CASTING,
+                receiver_url=self.receiver_url
+            )
+
+            logger.info(f"Successfully casting to {device_name}")
+            return {
+                "success": True,
+                "device_name": device_name,
+                "device_host": host,
+                "surface_id": surface_id,
+                "message": f"Casting to {device_name}"
+            }
+
+        except Exception as e:
+            logger.error(f"Error casting to {host}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_code": "CAST_ERROR"
+            }
 
     async def stop_cast(self, host: str) -> Dict[str, Any]:
         """Stop casting on a device.
@@ -327,7 +364,8 @@ class ChromecastController:
         """Get existing connection or create new one.
 
         Connects directly by IP using get_chromecast_from_host (no zeroconf/mDNS).
-        This avoids zeroconf lifecycle issues that cause stale state requiring reboots.
+        Properly cleans up pychromecast instances on timeout to prevent leaked
+        background threads that accumulate and require server restarts.
 
         Args:
             host: IP address of the device
@@ -348,11 +386,18 @@ class ChromecastController:
             except Exception:
                 pass
             del self._cast_devices[host]
+            # Also clean up associated controllers/sessions
+            self._canvas_controllers.pop(host, None)
+            self._sessions.pop(host, None)
 
         try:
             logger.info(f"Connecting to Chromecast at {host} (timeout: {timeout}s)")
 
             loop = asyncio.get_event_loop()
+
+            # Use a list to capture the pychromecast instance from the executor
+            # so we can clean it up on timeout (prevents leaked background threads)
+            cast_holder: list = []
 
             def _blocking_connect():
                 """Connect directly by IP — no zeroconf needed."""
@@ -360,6 +405,7 @@ class ChromecastController:
                     (host, 8009, UUID(int=0), None, None),
                     timeout=timeout,
                 )
+                cast_holder.append(_cast)
                 _cast.wait(timeout=timeout)
                 return _cast
 
@@ -370,6 +416,13 @@ class ChromecastController:
                 )
             except asyncio.TimeoutError:
                 logger.error(f"Timeout connecting to Chromecast at {host} after {timeout}s")
+                # Clean up the leaked pychromecast instance to stop its background thread
+                if cast_holder:
+                    try:
+                        cast_holder[0].disconnect()
+                        logger.debug(f"Cleaned up timed-out pychromecast instance for {host}")
+                    except Exception:
+                        pass
                 return None
 
             self._cast_devices[host] = cast

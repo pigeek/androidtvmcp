@@ -83,6 +83,9 @@ class DeviceManager:
         self.listener: Optional[AndroidTVServiceListener] = None
         self.discovery_running = False
         
+        # Map mDNS service name → device_id for removal handling
+        self._service_name_map: Dict[str, str] = {}
+        
         # Configuration
         self.discovery_config = config.get("discovery", {})
         self.connection_config = config.get("connection", {})
@@ -136,8 +139,14 @@ class DeviceManager:
                 elif state_change is ServiceStateChange.Updated:
                     asyncio.create_task(self._handle_updated_service(zeroconf, service_type, name))
             
-            # Focus specifically on Android TV remote service
-            service_types = ["_androidtvremote2._tcp.local."]
+            # Listen for both Android TV Remote AND Google Cast services.
+            # Android TV Remote (_androidtvremote2) is the primary discovery source.
+            # Google Cast (_googlecast) provides IP updates when DHCP leases change,
+            # since the Cast service often re-announces before the Remote service does.
+            service_types = [
+                "_androidtvremote2._tcp.local.",
+                "_googlecast._tcp.local.",
+            ]
             
             self.browser = AsyncServiceBrowser(
                 self.zeroconf.zeroconf,
@@ -198,24 +207,17 @@ class DeviceManager:
                 logger.debug(f"No addresses found for device: {name}")
                 return
             
-            # Use the first address
-            host = addresses[0]
+            # Use the first IPv4 address (skip link-local IPv6)
+            host = None
+            for addr in addresses:
+                if ":" not in addr:  # IPv4
+                    host = addr
+                    break
+            if not host:
+                host = addresses[0]
+            
             port = info.port or 6466
-            
-            # Generate consistent device ID from host:port
-            device_id = self._generate_device_id(host, port)
-            
-            # Check if device already exists
-            if device_id in self.devices:
-                await self._update_device_last_seen(device_id)
-                # Update host/port if changed
-                device = self.devices[device_id]
-                if device.host != host or device.port != port:
-                    device.host = host
-                    device.port = port
-                    logger.info(f"Updated device address: {device.name} ({host}:{port})")
-                return
-            
+
             # Extract properties
             properties = {}
             if info.properties:
@@ -225,6 +227,42 @@ class DeviceManager:
                     if isinstance(value, bytes):
                         value = value.decode('utf-8')
                     properties[key] = value
+
+            # Handle _googlecast._tcp services: use them only for IP updates
+            # on existing devices (matched by friendly name)
+            if "_googlecast._tcp" in service_type:
+                friendly_name = properties.get('fn', '')
+                if not friendly_name:
+                    return
+                # Find existing device with matching name and update its IP
+                for device in self.devices.values():
+                    if device.name == friendly_name and device.host != host:
+                        logger.info(f"Device IP updated via Cast mDNS: {device.name} {device.host}→{host}")
+                        device.host = host
+                        await self._update_device_last_seen(device.id)
+                return
+
+            # --- Below is for _androidtvremote2._tcp only ---
+            
+            # Extract the mDNS instance name (stable per device, independent of IP)
+            instance_name = name.replace(f".{service_type}", "").rstrip(".")
+
+            # Generate stable device ID from instance name (not from IP)
+            device_id = self._generate_device_id_from_name(instance_name)
+            
+            # Track service-name → device_id mapping for removal handling
+            self._service_name_map[name] = device_id
+            
+            # Check if device already exists
+            if device_id in self.devices:
+                device = self.devices[device_id]
+                # Update host/port if the IP changed (DHCP)
+                if device.host != host or device.port != port:
+                    logger.info(f"Device IP changed: {device.name} {device.host}→{host}:{port}")
+                    device.host = host
+                    device.port = port
+                await self._update_device_last_seen(device_id)
+                return
             
             # Determine initial pairing status based on stored certificates
             initial_pairing_status = PairingStatus.PAIRED if device_id in self.paired_device_ids else PairingStatus.NOT_PAIRED
@@ -299,7 +337,12 @@ class DeviceManager:
     async def _handle_removed_device(self, service_name: str) -> None:
         """Handle a removed Android TV device."""
         try:
-            device_id = self._extract_device_id_from_name(service_name)
+            # Look up device_id from our service name mapping
+            device_id = self._service_name_map.get(service_name)
+            if not device_id:
+                # Fallback: try old-style extraction
+                device_id = self._extract_device_id_from_name(service_name)
+            
             if device_id and device_id in self.devices:
                 device = self.devices[device_id]
                 device.status = DeviceStatus.DISCONNECTED
@@ -307,6 +350,9 @@ class DeviceManager:
                 # Close connection if exists
                 if device_id in self.connections:
                     await self._disconnect_device(device_id)
+                
+                # Clean up service name mapping
+                self._service_name_map.pop(service_name, None)
                 
                 logger.info(f"Android TV device removed: {device.name} ({device_id})")
 
@@ -469,7 +515,8 @@ class DeviceManager:
     def _generate_device_id(self, host: str, port: int) -> str:
         """Generate a consistent device ID from host and port.
         
-        This ensures the same device gets the same ID during discovery and pairing.
+        DEPRECATED: Use _generate_device_id_from_name for stable IDs.
+        Kept for backward compatibility with stored certificates.
         
         Args:
             host: Device host address
@@ -481,6 +528,21 @@ class DeviceManager:
         import hashlib
         device_key = f"{host}:{port}"
         return hashlib.md5(device_key.encode()).hexdigest()
+
+    def _generate_device_id_from_name(self, instance_name: str) -> str:
+        """Generate a stable device ID from the mDNS instance name.
+        
+        The instance name is tied to the device identity and doesn't change
+        when the device's IP address changes via DHCP.
+        
+        Args:
+            instance_name: The mDNS service instance name
+            
+        Returns:
+            Stable device ID (hex string)
+        """
+        import hashlib
+        return hashlib.md5(instance_name.encode()).hexdigest()
 
     def _extract_device_name_from_properties(self, properties: dict, fallback_name: str) -> str:
         """Extract device name from properties."""
