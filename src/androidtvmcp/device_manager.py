@@ -592,15 +592,24 @@ class DeviceManager:
         )
 
     async def get_device(self, device_id: str) -> Optional[AndroidTVDevice]:
-        """Get a specific device by ID.
-        
+        """Get a specific device by ID or friendly name.
+
         Args:
-            device_id: Device ID to retrieve
-            
+            device_id: Device hash ID or friendly name (e.g. "Living Room TV")
+
         Returns:
             AndroidTVDevice if found, None otherwise
         """
-        return self.devices.get(device_id)
+        # Exact ID lookup
+        device = self.devices.get(device_id)
+        if device:
+            return device
+        # Fallback: case-insensitive name match
+        device_id_lower = device_id.lower()
+        for d in self.devices.values():
+            if d.name and d.name.lower() == device_id_lower:
+                return d
+        return None
 
     async def get_connection(self, device_id: Optional[str] = None) -> Optional[AndroidTVRemote]:
         """Get connection to a device.

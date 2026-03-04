@@ -175,7 +175,7 @@ class AndroidTVMCPServer:
                 ),
                 Tool(
                     name="atv_get_devices",
-                    description="Get list of discovered Android TV/Chromecast devices on the network. IMPORTANT: Casting (atv_cast_url) works on ANY discovered device - no pairing needed. Pairing is ONLY required for remote control features (navigate, input, playback, volume, power). When multiple devices are found, ALWAYS ask the user which device to use - never assume.",
+                    description="Get list of discovered Android TV/Chromecast devices on the network. Casting (atv_cast_url) works on ANY discovered device without pairing. Pairing is ONLY required for remote control features. If the user already specified a device by name, match it and proceed — only ask when the user hasn't specified.",
                     inputSchema={
                         "type": "object",
                         "properties": {}
@@ -271,17 +271,17 @@ class AndroidTVMCPServer:
                 # Chromecast Casting Tools (no pairing required)
                 Tool(
                     name="atv_cast_url",
-                    description="Cast a Canvas surface to a Chromecast/Android TV device. NO PAIRING REQUIRED - works with ANY discovered device. If the user didn't specify which device, ask them to choose from the available devices first.",
+                    description="Cast a Canvas surface to a Chromecast/Android TV device. No pairing required. Use canvas_server_url and surface_id from the canvas_create or canvas_show result.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {
                                 "type": "string",
-                                "description": "Android TV device ID to cast to"
+                                "description": "Device name (e.g. 'Living Room TV') or device hash ID"
                             },
                             "canvas_server_url": {
                                 "type": "string",
-                                "description": "WebSocket URL of the Canvas server (e.g., ws://192.168.1.50:8080)"
+                                "description": "Base WebSocket URL of the Canvas server — use the canvas_server_url value returned by canvas_create or canvas_show"
                             },
                             "surface_id": {
                                 "type": "string",

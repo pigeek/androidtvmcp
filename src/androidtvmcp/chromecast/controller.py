@@ -474,25 +474,31 @@ class ChromecastController:
         cast.register_status_listener(listener)
 
         try:
-            # Check if app is already running
-            if cast.status and cast.status.app_id == app_id:
-                logger.info(f"App {app_id} is already running")
-                return True
+            already_running = cast.status and cast.status.app_id == app_id
 
-            # Launch the app
-            logger.info(f"Calling start_app({app_id}) on {cast.name}")
+            # Always call start_app to ensure receiver is fresh
+            logger.info(f"Calling start_app({app_id}) on {cast.name} (was_running={already_running})")
             try:
                 cast.start_app(app_id)
             except Exception as e:
+                if already_running:
+                    # App was running, start_app may fail — proceed anyway
+                    logger.warning(f"start_app raised {type(e).__name__} but app was already running, proceeding")
+                    return True
                 logger.error(f"start_app raised exception: {type(e).__name__}: {e}")
                 raise RuntimeError(f"Failed to start app {app_id}: {type(e).__name__}: {e}")
 
-            # Wait for app to be ready
+            # Wait for app to be ready — use short timeout if already running
+            # (re-launching an already-running app may not trigger a status callback)
+            wait_timeout = 3.0 if already_running else timeout
             try:
-                await asyncio.wait_for(app_ready.wait(), timeout=timeout)
+                await asyncio.wait_for(app_ready.wait(), timeout=wait_timeout)
                 logger.info(f"App {app_id} launched successfully")
                 return True
             except asyncio.TimeoutError:
+                if already_running:
+                    logger.info(f"App {app_id} was already running, proceeding after short wait")
+                    return True
                 logger.error(f"Timeout waiting for app {app_id} to launch")
                 raise TimeoutError(f"App {app_id} did not launch within {timeout}s")
 
