@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/pigeek-androidtvmcp-badge.png)](https://mseep.ai/app/pigeek-androidtvmcp)
+
 # AndroidTVMCP - Android TV Remote Control to MCP Bridge
 
 A Model Context Protocol (MCP) server that provides Android TV remote control functionality to AI assistants and other MCP clients.
